@@ -26,6 +26,7 @@ void upstreams_init(const proxy_config_t *cfg) {
         atomic_store(&b->total_failures, 0);
         atomic_store(&b->consecutive_failures, 0);
         atomic_store(&b->circuit_open_until, 0);
+        atomic_store(&b->half_open_probe, 0);
     }
     g_upstreams.count = cfg->backend_count;
 }

@@ -18,8 +18,14 @@ int cb_is_open(int backend_idx, const proxy_config_t *cfg) {
 
     time_t now = time(NULL);
     if (now >= until) {
-        /* Cooldown expired — allow a probe (half-open). */
-        return 0;
+        /* Cooldown expired — half-open: allow exactly one probe request. */
+        int expected = 0;
+        if (atomic_compare_exchange_strong(&b->half_open_probe, &expected, 1)) {
+            /* We won the CAS — this request is the probe. */
+            return 0;
+        }
+        /* Another request is already probing — stay open. */
+        return 1;
     }
     return 1;                           /* breaker open */
 }
@@ -27,6 +33,9 @@ int cb_is_open(int backend_idx, const proxy_config_t *cfg) {
 void cb_record_failure(int backend_idx, const proxy_config_t *cfg) {
     if (backend_idx < 0 || backend_idx >= g_upstreams.count) return;
     backend_t *b = &g_upstreams.backends[backend_idx];
+
+    /* Reset probe flag so next half-open window allows a new probe. */
+    atomic_store(&b->half_open_probe, 0);
 
     int cf = atomic_fetch_add(&b->consecutive_failures, 1) + 1;
 
@@ -43,4 +52,5 @@ void cb_record_success(int backend_idx) {
     backend_t *b = &g_upstreams.backends[backend_idx];
     atomic_store(&b->consecutive_failures, 0);
     atomic_store(&b->circuit_open_until, 0);
+    atomic_store(&b->half_open_probe, 0);
 }

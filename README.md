@@ -21,7 +21,7 @@ Unlike thread-per-connection designs, Orchestrix Proxy uses a fixed worker pool 
 | **Load Balancing** | Round-robin and least-connections strategies |
 | **Health Checks** | Periodic backend probes; unhealthy backends skipped automatically |
 | **Failover** | If the chosen backend fails, the proxy retries another healthy backend |
-| **Circuit Breaker** | Per-backend failure tracking; breaker opens after threshold, cools down, and probes recovery (implicit half-open — see [ARCHITECTURE.md](docs/ARCHITECTURE.md#circuit-breaker-lifecycle)) |
+| **Circuit Breaker** | Per-backend failure tracking; opens after threshold, cools down, allows exactly one probe request (half-open via CAS), recovers on success |
 | **Connection Draining** | Backends can be set to DRAINING — no new traffic, in-flight requests complete |
 | **Rate Limiting** | Per-client-IP fixed-window rate limiter; returns 429 Too Many Requests |
 | **Request Body Limit** | Rejects oversized payloads with 413 Payload Too Large |

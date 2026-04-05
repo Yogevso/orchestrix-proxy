@@ -32,6 +32,7 @@ typedef struct {
     /* Circuit breaker state */
     atomic_int   consecutive_failures;
     atomic_long  circuit_open_until;   /* epoch seconds; 0 = closed */
+    atomic_int   half_open_probe;      /* 1 = probe in-flight (only one allowed) */
 } backend_t;
 
 typedef struct {

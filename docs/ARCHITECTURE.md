@@ -111,7 +111,7 @@ Each backend has a `state` field (`atomic_int`) with three values:
 
 ## Circuit Breaker Lifecycle
 
-State is encoded in two atomics on `backend_t`: `consecutive_failures` and `circuit_open_until`.
+State is encoded in three atomics on `backend_t`: `consecutive_failures`, `circuit_open_until`, and `half_open_probe`.
 
 ```
                  consecutive_failures < threshold
@@ -128,30 +128,32 @@ State is encoded in two atomics on `backend_t`: `consecutive_failures` and `circ
            │       ┌──────────┐                          │
            │       │   OPEN    │                         │
            │       │ (open=T)  │  requests skipped       │
-           │       └─────┬─────┘                         │
+           │       └─────┬─────┘                          │
            │             │                               │
            │   time(NULL) >= circuit_open_until           │
            │             │                               │
            │             ▼                               │
            │       ┌──────────┐                          │
-           │       │HALF-OPEN  │                         │
-  success  │       │ (probe)   │  one request allowed    │
-  resets   │       └─────┬─────┘                         │
-  both     │             │                               │
-  fields   │      success│         failure               │
+           │       │HALF-OPEN  │  CAS(half_open_probe,   │
+  success  │       │ (probe)   │    0→1) gates exactly   │
+  resets   │       │           │    one probe request    │
+  all 3    │       └─────┬─────┘                          │
+  fields   │             │                               │
+           │      success│         failure               │
            │             │            │                  │
            └─────────────┘            │  re-trips:       │
                                       │  open_until =    │
                                       │  now + cooldown  │
+                                      │  probe flag = 0  │
                                       └──────────────────┘
 ```
 
 **Implementation**:
-- `cb_is_open()` — returns 1 only when `now < circuit_open_until`. Returns 0 for closed (0) or half-open (expired).
-- `cb_record_failure()` — atomically increments `consecutive_failures`. If ≥ threshold, sets `circuit_open_until = now + cooldown_sec`.
-- `cb_record_success()` — atomically stores 0 to both fields (resets to CLOSED).
+- `cb_is_open()` — returns 1 when `now < circuit_open_until` (OPEN). When cooldown expires, uses `atomic_compare_exchange_strong(&b->half_open_probe, 0, 1)` to allow exactly one probe request through. Subsequent requests see the CAS fail and remain blocked.
+- `cb_record_failure()` — atomically increments `consecutive_failures`. If ≥ threshold, sets `circuit_open_until = now + cooldown_sec` and resets `half_open_probe = 0` so the next half-open window can issue a fresh probe.
+- `cb_record_success()` — atomically stores 0 to all three fields (resets to CLOSED).
 
-No separate state enum — the state is derived from the two atomic values. This avoids multi-field atomic commits.
+The CAS-based probe gate ensures that under concurrent access, exactly one worker thread acts as the probe during half-open — all others see the breaker as still open.
 
 ---
 
