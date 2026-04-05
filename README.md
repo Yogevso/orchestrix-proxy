@@ -1,5 +1,7 @@
 # Orchestrix Proxy
 
+> **Part of the [Orchestrix Platform](https://github.com/Yogevso/Orchestrix-Platform)** — the edge layer handling routing, load balancing, and failure isolation.
+
 [![CI](https://github.com/Yogevso/orchestrix-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Yogevso/orchestrix-proxy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C11](https://img.shields.io/badge/C-C11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
