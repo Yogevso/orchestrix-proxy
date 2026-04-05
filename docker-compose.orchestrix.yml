@@ -1,0 +1,152 @@
+# ===========================================================================
+#  Orchestrix Platform Gateway — Full Stack
+#
+#  Puts orchestrix-proxy in front of the real Orchestrix services:
+#    Engine   — task orchestration and workflow engine
+#    Insights — system telemetry and analytics API
+#    IAM      — identity, auth, and RBAC service
+#
+#  Usage:
+#    docker compose -f docker-compose.orchestrix.yml up --build
+#
+#    curl http://localhost:8080/health          → proxy liveness
+#    curl http://localhost:8080/stats           → proxy metrics (JSON)
+#    curl http://localhost:8081/admin/config    → running config
+#
+#  Note: The proxy round-robins across all three services (it does not
+#  route by URL path). This demo shows health checking, circuit breaking,
+#  and observability working against real backend services.
+#
+#  Requires sibling repos checked out under the same parent directory:
+#    ../Orchestrix-Engine
+#    ../system-insights-api
+#    ../identity-access-service
+# ===========================================================================
+
+services:
+
+  # ── Proxy (this repo) ─────────────────────────────────────────────────
+  proxy:
+    build: .
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - ./docker/orchestrix-platform.conf:/app/proxy.conf:ro
+    depends_on:
+      engine:
+        condition: service_started
+      insights:
+        condition: service_started
+      iam:
+        condition: service_started
+
+  # ── Orchestrix Engine ─────────────────────────────────────────────────
+  engine:
+    build:
+      context: ../Orchestrix-Engine
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn orchestrix.api.app:app --host 0.0.0.0 --port 8000"
+    expose:
+      - "8000"
+    environment:
+      ORCHESTRIX_DATABASE_URL: postgresql+asyncpg://orchestrix:orchestrix@engine-db:5432/orchestrix
+      ORCHESTRIX_DATABASE_URL_SYNC: postgresql://orchestrix:orchestrix@engine-db:5432/orchestrix
+      ORCHESTRIX_REDIS_URL: redis://engine-redis:6379/0
+    depends_on:
+      engine-db:
+        condition: service_healthy
+      engine-redis:
+        condition: service_started
+
+  engine-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orchestrix
+      POSTGRES_PASSWORD: orchestrix
+      POSTGRES_DB: orchestrix
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrix"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  engine-redis:
+    image: redis:7
+
+  # ── System Insights API ───────────────────────────────────────────────
+  insights:
+    build:
+      context: ../system-insights-api
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@insights-db:5432/system_insights
+    depends_on:
+      insights-db:
+        condition: service_healthy
+
+  insights-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: system_insights
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # ── Identity Access Service ───────────────────────────────────────────
+  iam:
+    build:
+      context: ../identity-access-service
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://iam:iam@iam-db:5432/iam
+      JWT_SECRET_KEY: platform-demo-key-change-in-production
+    depends_on:
+      iam-db:
+        condition: service_healthy
+
+  iam-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: iam
+      POSTGRES_PASSWORD: iam
+      POSTGRES_DB: iam
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iam"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # ── Observability ─────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - proxy
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/proxy.json
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

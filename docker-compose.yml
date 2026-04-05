@@ -1,0 +1,74 @@
+# ===========================================================================
+#  Orchestrix Proxy — Docker Compose Demo Stack
+#
+#  Spins up the proxy plus three tiny echo backends so you can demo
+#  round-robin, failover, health checks, and stats out of the box.
+#
+#  Usage:
+#    docker compose up --build
+#    curl http://localhost:8080/         → proxied to a backend
+#    curl http://localhost:8080/stats    → JSON metrics
+#    curl http://localhost:8080/metrics  → Prometheus format
+#    curl http://localhost:8081/admin/config  → admin API
+#
+#  Kill a backend:   docker compose stop backend2
+#  Watch recovery:   curl http://localhost:8080/stats
+#
+#  Observability:
+#    Prometheus:  http://localhost:9090
+#    Grafana:     http://localhost:3000  (admin / admin)
+# ===========================================================================
+
+services:
+  proxy:
+    build: .
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - ./docker/proxy.conf:/app/proxy.conf:ro
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+
+  backend1:
+    image: hashicorp/http-echo
+    command: ["-listen=:9001", "-text=backend1"]
+    expose:
+      - "9001"
+
+  backend2:
+    image: hashicorp/http-echo
+    command: ["-listen=:9002", "-text=backend2"]
+    expose:
+      - "9002"
+
+  backend3:
+    image: hashicorp/http-echo
+    command: ["-listen=:9003", "-text=backend3"]
+    expose:
+      - "9003"
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - proxy
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/proxy.json
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

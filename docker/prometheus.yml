@@ -1,0 +1,9 @@
+# Prometheus scrape configuration for Orchestrix Proxy
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "orchestrix-proxy"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["proxy:8080"]

@@ -3,6 +3,7 @@
 
 # Build artifacts
 server
+proxy
 
 # Object files
 *.o
